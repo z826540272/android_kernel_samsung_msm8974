@@ -153,7 +153,7 @@ struct mem_cgroup_zone {
 /*
  * From 0 .. 100.  Higher means more swappy.
  */
-int vm_swappiness = 60;
+int vm_swappiness = 40;
 long vm_total_pages;	/* The total number of pages which the VM controls */
 
 #ifdef CONFIG_RUNTIME_COMPCACHE
@@ -1360,12 +1360,16 @@ putback_inactive_pages(struct mem_cgroup_zone *mz,
 		lru = page_lru(page);
 		add_page_to_lru_list(zone, page, lru);
 
+#ifdef CONFIG_ZCACHE
 		file = is_file_lru(lru);
-		if (IS_ENABLED(CONFIG_ZCACHE))
 			if (file)
 				SetPageWasActive(page);
+#endif
 		if (is_active_lru(lru)) {
 			int numpages = hpage_nr_pages(page);
+#ifndef CONFIG_ZCACHE
+			file = is_file_lru(lru);
+#endif
 			reclaim_stat->recent_rotated[file] += numpages;
 		}
 		if (put_page_testzero(page)) {
@@ -1660,12 +1664,14 @@ static void shrink_active_list(unsigned long nr_to_scan,
 		}
 
 		ClearPageActive(page);	/* we are de-activating */
+#ifdef CONFIG_ZCACHE
 		if (IS_ENABLED(CONFIG_ZCACHE))
 			/*
 			 * For zcache to know whether the page is from active
 			 * file list
 			 */
 			SetPageWasActive(page);
+#endif
 		list_add(&page->lru, &l_inactive);
 	}
 
