@@ -29,8 +29,8 @@
 #include <linux/completion.h>
 #include <linux/mutex.h>
 #include <linux/syscore_ops.h>
-
 #include <trace/events/power.h>
+#include <linux/sched.h>
 
 /**
  * The "cpufreq driver" - the arch- or hardware-dependent low
@@ -441,6 +441,9 @@ static ssize_t store_##file_name					\
 	unsigned int ret = -EINVAL;					\
 	struct cpufreq_policy new_policy;				\
 									\
+	if (!strcmp(current->comm, "mpdecision") || !strcmp(current->comm, "init"))\
+		return ret;						\
+	printk("Tuned: %s changing min/max frequency\n", current->comm);\
 	ret = cpufreq_get_policy(&new_policy, policy->cpu);		\
 	if (ret)							\
 		return -EINVAL;						\
