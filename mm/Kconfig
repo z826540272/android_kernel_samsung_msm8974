@@ -431,7 +431,7 @@ config ZSWAP
 	depends on FRONTSWAP && CRYPTO
 	select CRYPTO_LZO
 	select ZSMALLOC_NEW
-	default n
+	default y
 	help
 	  Zswap is a backend for the frontswap mechanism in the VMM.
 	  It receives pages from frontswap and attempts to store them
