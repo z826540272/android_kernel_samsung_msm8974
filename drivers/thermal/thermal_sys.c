@@ -703,6 +703,7 @@ passive_show(struct device *dev, struct device_attribute *attr,
 }
 
 static DEVICE_ATTR(type, 0444, type_show, NULL);
+static DEVICE_ATTR(curr_temp, 0444, temp_show, NULL);
 static DEVICE_ATTR(temp, 0444, temp_show, NULL);
 static DEVICE_ATTR(mode, 0644, mode_show, mode_store);
 static DEVICE_ATTR(passive, S_IRUGO | S_IWUSR, passive_show, passive_store);
@@ -1099,19 +1100,19 @@ thermal_remove_hwmon_sysfs(struct thermal_zone_device *tz)
 #endif
 
 static void thermal_zone_device_set_polling(struct thermal_zone_device *tz,
-					    int delay)
+                                            int delay)
 {
-	cancel_delayed_work(&(tz->poll_queue));
+        cancel_delayed_work(&(tz->poll_queue));
 
-	if (!delay)
-		return;
+        if (!delay)
+                return;
 
-	if (delay > 1000)
-		queue_delayed_work(system_freezable_wq, &(tz->poll_queue),
-				      round_jiffies(msecs_to_jiffies(delay)));
-	else
-		queue_delayed_work(system_freezable_wq, &(tz->poll_queue),
-				      msecs_to_jiffies(delay));
+        if (delay > 1000)
+                queue_delayed_work(system_freezable_wq, &(tz->poll_queue),
+                                      round_jiffies(msecs_to_jiffies(delay)));
+        else
+                queue_delayed_work(system_freezable_wq, &(tz->poll_queue),
+                                      msecs_to_jiffies(delay));
 }
 
 static void thermal_zone_device_passive(struct thermal_zone_device *tz,
@@ -1635,6 +1636,10 @@ struct thermal_zone_device *thermal_zone_device_register(char *type,
 		if (result)
 			goto unregister;
 	}
+
+        result = device_create_file(&tz->device, &dev_attr_curr_temp);
+        if (result)
+                goto unregister;
 
 	result = device_create_file(&tz->device, &dev_attr_temp);
 	if (result)
