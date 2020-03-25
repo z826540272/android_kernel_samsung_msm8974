@@ -50,10 +50,6 @@ atomic_t zswap_pool_pages = ATOMIC_INIT(0);
 /* The number of compressed pages currently stored in zswap */
 atomic_t zswap_stored_pages = ATOMIC_INIT(0);
 
-#ifdef CONFIG_ZSWAP_ENABLE_WRITEBACK
-/* The number of outstanding pages awaiting writeback */
-static atomic_t zswap_outstanding_writebacks = ATOMIC_INIT(0);
-#endif
 
 /*
  * The statistics below are not protected from concurrent access for
@@ -79,23 +75,9 @@ static bool zswap_enabled = 1;
 module_param_named(enabled, zswap_enabled, bool, 0);
 
 /* Compressor to be used by zswap (fixed at boot for now) */
-#define ZSWAP_COMPRESSOR_DEFAULT "lzo"
+#define ZSWAP_COMPRESSOR_DEFAULT "lz4"
 static char *zswap_compressor = ZSWAP_COMPRESSOR_DEFAULT;
 module_param_named(compressor, zswap_compressor, charp, 0);
-
-/* The maximum percentage of memory that the compressed pool can occupy */
-static unsigned int zswap_max_pool_percent = 20;
-module_param_named(max_pool_percent,
-			zswap_max_pool_percent, uint, 0644);
-
-/*
- * Maximum compression ratio, as as percentage, for an acceptable
- * compressed page. Any pages that do not compress by at least
- * this ratio will be rejected.
-*/
-static unsigned int zswap_max_compression_ratio = 80;
-module_param_named(max_compression_ratio,
-			zswap_max_compression_ratio, uint, 0644);
 
 /*
  * Maximum number of outstanding writebacks allowed at any given time.
@@ -183,7 +165,7 @@ static void zswap_comp_exit(void)
  *            be held while changing the refcount.  Since the lock must
  *            be held, there is no reason to also make refcount atomic.
  * type - the swap type for the entry.  Used to map back to the zswap_tree
- *        structure that contains the entry.
+  *        structure that contains the entry.
  * offset - the swap offset for the entry.  Index into the red-black tree.
  * handle - zsmalloc allocation handle that stores the compressed page data
  * length - the length in bytes of the compressed page data.  Needed during
@@ -388,11 +370,6 @@ cleanup:
 **********************************/
 static mempool_t *zswap_page_pool;
 
-static inline unsigned int zswap_max_pool_pages(void)
-{
-	return zswap_max_pool_percent * totalram_pages / 100;
-}
-
 static inline int zswap_page_pool_create(void)
 {
 	/* TODO: dynamically size mempool */
@@ -410,11 +387,12 @@ static inline void zswap_page_pool_destroy(void)
 static struct page *zswap_alloc_page(gfp_t flags)
 {
 	struct page *page;
-
+#if 0
 	if (atomic_read(&zswap_pool_pages) >= zswap_max_pool_pages()) {
 		zswap_pool_limit_hit++;
 		return NULL;
 	}
+#endif
 	page = mempool_alloc(zswap_page_pool, flags);
 	if (page)
 		atomic_inc(&zswap_pool_pages);
@@ -450,259 +428,10 @@ static void zswap_free_entry(struct zswap_tree *tree, struct zswap_entry *entry)
 	atomic_dec(&zswap_stored_pages);
 }
 
-#ifdef CONFIG_ZSWAP_ENABLE_WRITEBACK
-/*********************************
-* writeback code
-**********************************/
-static void zswap_end_swap_write(struct bio *bio, int err)
-{
-	end_swap_bio_write(bio, err);
-	atomic_dec(&zswap_outstanding_writebacks);
-	zswap_written_back_pages++;
-}
-
-/* return enum for zswap_get_swap_cache_page */
-enum zswap_get_swap_ret {
-	ZSWAP_SWAPCACHE_NEW,
-	ZSWAP_SWAPCACHE_EXIST,
-	ZSWAP_SWAPCACHE_NOMEM
-};
-
-/*
- * zswap_get_swap_cache_page
- *
- * This is an adaption of read_swap_cache_async()
- *
- * This function tries to find a page with the given swap entry
- * in the swapper_space address space (the swap cache).  If the page
- * is found, it is returned in retpage.  Otherwise, a page is allocated,
- * added to the swap cache, and returned in retpage.
- *
- * If success, the swap cache page is returned in retpage
- * Returns 0 if page was already in the swap cache, page is not locked
- * Returns 1 if the new page needs to be populated, page is locked
- * Returns <0 on error
- */
-static int zswap_get_swap_cache_page(swp_entry_t entry,
-				struct page **retpage)
-{
-	struct page *found_page, *new_page = NULL;
-	struct address_space *swapper_space = &swapper_spaces[swp_type(entry)];
-	int err;
-
-	*retpage = NULL;
-	do {
-		/*
-		 * First check the swap cache.  Since this is normally
-		 * called after lookup_swap_cache() failed, re-calling
-		 * that would confuse statistics.
-		 */
-		found_page = find_get_page(swapper_space, entry.val);
-		if (found_page)
-			break;
-
-		/*
-		 * Get a new page to read into from swap.
-		 */
-		if (!new_page) {
-			new_page = alloc_page(GFP_KERNEL);
-			if (!new_page)
-				break; /* Out of memory */
-		}
-
-		/*
-		 * call radix_tree_preload() while we can wait.
-		 */
-		err = radix_tree_preload(GFP_KERNEL);
-		if (err)
-			break;
-
-		/*
-		 * Swap entry may have been freed since our caller observed it.
-		 */
-		err = swapcache_prepare(entry);
-		if (err == -EEXIST) { /* seems racy */
-			radix_tree_preload_end();
-			continue;
-		}
-		if (err) { /* swp entry is obsolete ? */
-			radix_tree_preload_end();
-			break;
-		}
-
-		/* May fail (-ENOMEM) if radix-tree node allocation failed. */
-		__set_page_locked(new_page);
-		SetPageSwapBacked(new_page);
-		err = __add_to_swap_cache(new_page, entry);
-		if (likely(!err)) {
-			radix_tree_preload_end();
-			lru_cache_add_anon(new_page);
-			*retpage = new_page;
-			return ZSWAP_SWAPCACHE_NEW;
-		}
-		radix_tree_preload_end();
-		ClearPageSwapBacked(new_page);
-		__clear_page_locked(new_page);
-		/*
-		 * add_to_swap_cache() doesn't return -EEXIST, so we can safely
-		 * clear SWAP_HAS_CACHE flag.
-		 */
-		swapcache_free(entry, NULL);
-	} while (err != -ENOMEM);
-
-	if (new_page)
-		page_cache_release(new_page);
-	if (!found_page)
-		return ZSWAP_SWAPCACHE_NOMEM;
-	*retpage = found_page;
-	return ZSWAP_SWAPCACHE_EXIST;
-}
-
-/*
- * Attempts to free and entry by adding a page to the swap cache,
- * decompressing the entry data into the page, and issuing a
- * bio write to write the page back to the swap device.
- *
- * This can be thought of as a "resumed writeback" of the page
- * to the swap device.  We are basically resuming the same swap
- * writeback path that was intercepted with the frontswap_store()
- * in the first place.  After the page has been decompressed into
- * the swap cache, the compressed version stored by zswap can be
- * freed.
- */
-static int zswap_writeback_entry(struct zswap_tree *tree,
-				struct zswap_entry *entry)
-{
-	unsigned long type = tree->type;
-	struct page *page;
-	swp_entry_t swpentry;
-	u8 *src, *dst;
-	unsigned int dlen;
-	int ret;
-	struct writeback_control wbc = {
-		.sync_mode = WB_SYNC_NONE,
-	};
-
-	/* get/allocate page in the swap cache */
-	swpentry = swp_entry(type, entry->offset);
-
-	/* try to allocate swap cache page */
-	switch (zswap_get_swap_cache_page(swpentry, &page)) {
-
-	case ZSWAP_SWAPCACHE_NOMEM: /* no memory */
-		return -ENOMEM;
-		break; /* not reached */
-
-	case ZSWAP_SWAPCACHE_EXIST: /* page is unlocked */
-		/* page is already in the swap cache, ignore for now */
-		return -EEXIST;
-		break; /* not reached */
-
-	case ZSWAP_SWAPCACHE_NEW: /* page is locked */
-		/* decompress */
-		dlen = PAGE_SIZE;
-		src = zs_map_object(tree->pool, entry->handle, ZS_MM_RO);
-		dst = kmap_atomic(page);
-		ret = zswap_comp_op(ZSWAP_COMPOP_DECOMPRESS, src, entry->length,
-				dst, &dlen);
-		kunmap_atomic(dst);
-		zs_unmap_object(tree->pool, entry->handle);
-		BUG_ON(ret);
-		BUG_ON(dlen != PAGE_SIZE);
-
-		/* page is up to date */
-		SetPageUptodate(page);
-	}
-
-	/* start writeback */
-	SetPageReclaim(page);
-	if (!__swap_writepage(page, &wbc, zswap_end_swap_write))
-		atomic_inc(&zswap_outstanding_writebacks);
-	page_cache_release(page);
-
-	return 0;
-}
-
-/*
- * Attempts to free nr of entries via writeback to the swap device.
- * The number of entries that were actually freed is returned.
- */
-static int zswap_writeback_entries(struct zswap_tree *tree, int nr)
-{
-	struct zswap_entry *entry;
-	int i, ret, refcount, freed_nr = 0;
-
-	for (i = 0; i < nr; i++) {
-		/*
-		 * This limits is arbitrary for now until a better
-		 * policy can be implemented. This is so we don't
-		 * eat all of RAM decompressing pages for writeback.
-		 */
-		if (atomic_read(&zswap_outstanding_writebacks) >
-				ZSWAP_MAX_OUTSTANDING_FLUSHES)
-			break;
-
-		spin_lock(&tree->lock);
-
-		/* dequeue from lru */
-		if (list_empty(&tree->lru)) {
-			spin_unlock(&tree->lock);
-			break;
-		}
-		entry = list_first_entry(&tree->lru,
-				struct zswap_entry, lru);
-		list_del_init(&entry->lru);
-
-		/* so invalidate doesn't free the entry from under us */
-		zswap_entry_get(entry);
-
-		spin_unlock(&tree->lock);
-
-		/* attempt writeback */
-		ret = zswap_writeback_entry(tree, entry);
-
-		spin_lock(&tree->lock);
-
-		/* drop reference from above */
-		refcount = zswap_entry_put(entry);
-
-		if (!ret)
-			/* drop the initial reference from entry creation */
-			refcount = zswap_entry_put(entry);
-
-		/*
-		 * There are four possible values for refcount here:
-		 * (1) refcount is 2, writeback failed and load is in progress;
-		 *     do nothing, load will add us back to the LRU
-		 * (2) refcount is 1, writeback failed; do not free entry,
-		 *     add back to LRU
-		 * (3) refcount is 0, (normal case) not invalidate yet;
-		 *     remove from rbtree and free entry
-		 * (4) refcount is -1, invalidate happened during writeback;
-		 *     free entry
-		 */
-		if (refcount == 1)
-			list_add(&entry->lru, &tree->lru);
-
-		if (refcount == 0) {
-			/* no invalidate yet, remove from rbtree */
-			rb_erase(&entry->rbnode, &tree->rbroot);
-		}
-		spin_unlock(&tree->lock);
-		if (refcount <= 0) {
-			/* free the entry */
-			zswap_free_entry(tree, entry);
-			freed_nr++;
-		}
-	}
-	return freed_nr;
-}
-#endif /* CONFIG_ZSWAP_ENABLE_WRITEBACK */
-
 /*******************************************
 * page pool for temporary compression result
 ********************************************/
-#define ZSWAP_TMPPAGE_POOL_PAGES 16
+#define ZSWAP_TMPPAGE_POOL_PAGES 4
 static LIST_HEAD(zswap_tmppage_list);
 static DEFINE_SPINLOCK(zswap_tmppage_lock);
 
@@ -774,9 +503,6 @@ static int zswap_frontswap_store(unsigned type, pgoff_t offset,
 	u8 *src, *dst;
 	struct page *tmppage;
 	bool writeback_attempted = 0;
-#ifdef CONFIG_ZSWAP_ENABLE_WRITEBACK
-	u8 *tmpdst;
-#endif
 
 	if (!tree) {
 		ret = -ENODEV;
@@ -806,53 +532,14 @@ static int zswap_frontswap_store(unsigned type, pgoff_t offset,
 		ret = -EINVAL;
 		goto freepage;
 	}
-	if ((dlen * 100 / PAGE_SIZE) > zswap_max_compression_ratio) {
-		zswap_reject_compress_poor++;
-		ret = -E2BIG;
-		goto freepage;
-	}
 
 	/* store */
 	handle = zs_malloc(tree->pool, dlen,
 		__GFP_NORETRY | __GFP_HIGHMEM | __GFP_NOMEMALLOC |
 			__GFP_NOWARN);
 	if (!handle) {
-#ifdef CONFIG_ZSWAP_ENABLE_WRITEBACK
-		zswap_writeback_attempted++;
-		/*
-		 * Copy compressed buffer out of per-cpu storage so
-		 * we can re-enable preemption.
-		*/
-		tmppage = zswap_tmppage_alloc();
-		if (!tmppage) {
-			zswap_reject_tmppage_fail++;
-			ret = -ENOMEM;
-			goto freepage;
-		}
-		writeback_attempted = 1;
-		tmpdst = page_address(tmppage);
-		memcpy(tmpdst, dst, dlen);
-		dst = tmpdst;
-		put_cpu_var(zswap_dstmem);
-
-		/* try to free up some space */
-		/* TODO: replace with more targeted policy */
-		zswap_writeback_entries(tree, 16);
-		/* try again, allowing wait */
-		handle = zs_malloc(tree->pool, dlen,
-			__GFP_NORETRY | __GFP_HIGHMEM | __GFP_NOMEMALLOC |
-				__GFP_NOWARN);
-		if (!handle) {
-			/* still no space, fail */
-			zswap_reject_zsmalloc_fail++;
-			ret = -ENOMEM;
-			goto freepage;
-		}
-		zswap_saved_by_writeback++;
-#else
 		ret = -ENOMEM;
 		goto freepage;
-#endif
 	}
 
 	buf = zs_map_object(tree->pool, handle, ZS_MM_WO);
@@ -1099,10 +786,6 @@ static int __init zswap_debugfs_init(void)
 			zswap_debugfs_root, &zswap_pool_pages);
 	debugfs_create_atomic_t("stored_pages", S_IRUGO,
 			zswap_debugfs_root, &zswap_stored_pages);
-#ifdef CONFIG_ZSWAP_ENABLE_WRITEBACK
-	debugfs_create_atomic_t("outstanding_writebacks", S_IRUGO,
-			zswap_debugfs_root, &zswap_outstanding_writebacks);
-#endif
 	return 0;
 }
 
