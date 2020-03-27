@@ -708,8 +708,8 @@ if [ "apply_governor_profile" == "$1" ]; then
 		echo "1267200" > /sys/devices/system/cpu/cpufreq/Tuned/hispeed_freq
 		echo "40000" > /sys/devices/system/cpu/cpufreq/Tuned/min_sample_time
 		echo "0" > /sys/devices/system/cpu/cpufreq/Tuned/sync_freq
-		echo "80" > /sys/devices/system/cpu/cpufreq/Tuned/target_loads
-		echo "20000" > /sys/devices/system/cpu/cpufreq/Tuned/timer_rate
+		echo "70" > /sys/devices/system/cpu/cpufreq/Tuned/target_loads
+		echo "10000" > /sys/devices/system/cpu/cpufreq/Tuned/timer_rate
 	fi
 
 	if [ "Tuned - battery" == "$2" ]; then
@@ -718,7 +718,7 @@ if [ "apply_governor_profile" == "$1" ]; then
                 echo "1267200" > /sys/devices/system/cpu/cpufreq/Tuned/hispeed_freq
                 echo "40000" > /sys/devices/system/cpu/cpufreq/Tuned/min_sample_time
                 echo "0" > /sys/devices/system/cpu/cpufreq/Tuned/sync_freq
-                echo "90" > /sys/devices/system/cpu/cpufreq/Tuned/target_loads
+                echo "80" > /sys/devices/system/cpu/cpufreq/Tuned/target_loads
                 echo "20000" > /sys/devices/system/cpu/cpufreq/Tuned/timer_rate
 	fi
 
