@@ -30,7 +30,7 @@ static void tunedinit(struct work_struct *work)
 {
    char *argv[4];
    char *envp[5];
-   int ret;
+   int ret, wasenf;
 
    envp[0] = "HOME=/";
    envp[1] = "USER=root";
@@ -38,20 +38,12 @@ static void tunedinit(struct work_struct *work)
    envp[3] = "PWD=/";
    envp[4] = NULL;
 
-   argv[0] = "/system/bin/toybox";
-   argv[1] = "stop";
-   argv[2] = "mpdecision";
    argv[3] = NULL;
 
+#ifdef CONFIG_SECURITY_SELINUX
+   wasenf = selinux_enforcing;
    selinux_enforcing = 0;
-
-   ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
-   printk("Tuned init %s %s %s ret %d\n", argv[0], argv[1], argv[2], ret);
-
-   argv[2] = "thermal-engine";
-
-   ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
-   printk("Tuned init %s %s %s ret %d\n", argv[0], argv[1], argv[2], ret);
+#endif
 
 #ifdef CONFIG_VNSWAP
    vnswap_init_disksize(536870912);
@@ -78,7 +70,7 @@ static void tunedinit(struct work_struct *work)
    ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
    printk("Tuned init %s %s ret %d\n", argv[0], argv[1], ret);
 #endif
-//   selinux_enforcing = 1;
+   selinux_enforcing = wasenf;
 }
 
 late_initcall(tunedinittimer);
