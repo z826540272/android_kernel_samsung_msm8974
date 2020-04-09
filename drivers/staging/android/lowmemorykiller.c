@@ -85,7 +85,7 @@ static int lowmem_shrink(void)
 	short min_score_adj = OOM_SCORE_ADJ_MAX + 1;
 	int minfree = 0, oom_score, tki = 0;
 	int array_size = ARRAY_SIZE(lowmem_adj);
-	int free = global_page_state(NR_FREE_PAGES) + global_page_state(NR_FILE_PAGES) - 25;
+	int free = global_page_state(NR_FREE_PAGES) + global_page_state(NR_FILE_PAGES);
 
 	static unsigned int expire=0, count=0;
 
