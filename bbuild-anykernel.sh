@@ -27,9 +27,7 @@ DTBTOOL_CMD="-2"
 MODULES_IN_SYSTEM="y"
 OUTPUT_FOLDER="output"
 
-DEFCONFIG="Boeffla_@$VAR@_defconfig"
-#DEFCONFIG="lineage_klte_pn547_defconfig"
-#Boeffla_@klte@_defconfig  Boeffla_@klteduos@_defconfig  Boeffla_@kltedv@_defconfig  Boeffla_@kltekdi@_defconfig  Boeffla_@kltekor@_defconfig Boeffla_@kltechn@_defconfig
+DEFCONFIG="tuned_klte_defconfig"
 
 KERNEL_NAME="Boeffla-Kernel"
 
@@ -121,20 +119,166 @@ step2_make_config()
 
 	# build make string depending on if we need to compile to an output folder
 	# and if we need to have a defconfig variant
-	MAKESTRING="arch=$ARCHITECTURE $DEFCONFIG"
+	MAKESTRING="arch=$ARCHITECTURE oldconfig"
 
 	if [ ! -z "$OUTPUT_FOLDER" ]; then
 		rm -rf $BUILD_PATH/output
 		mkdir $BUILD_PATH/output
 		MAKESTRING="O=$OUTPUT_FOLDER $MAKESTRING"
+	        cd $BUILD_PATH
+	        cp arch/arm/configs/tuned_klte_defconfig $OUTPUT_FOLDER/.config
 	fi
 
-	if [ ! -z "$DEFCONFIG_VARIANT" ]; then
-		MAKESTRING="$MAKESTRING VARIANT_DEFCONFIG=$DEFCONFIG_VARIANT SELINUX_DEFCONFIG=selinux_defconfig"
-	fi
+case "$VAR" in
+        klte)
+    echo "Compiling kernel for klte"
+    ;;
 
-	# jump to build path and make config
-	cd $BUILD_PATH
+        kltedv)
+    scripts/configcleaner "
+CONFIG_NFC_PN547
+CONFIG_NFC_PN547_PMC8974_CLK_REQ
+CONFIG_BCM2079X_NFC_I2C
+"
+
+    echo "
+# CONFIG_NFC_PN547 is not set
+# CONFIG_NFC_PN547_PMC8974_CLK_REQ is not set
+CONFIG_BCM2079X_NFC_I2C=y
+" >> $OUTPUT_FOLDER/.config
+
+    echo "Compiling kernel for kltedv"
+    ;;
+
+        kltekdi)
+    scripts/configcleaner "
+CONFIG_MACH_KLTE_EUR
+CONFIG_MACH_KLTE_JPN
+CONFIG_MACH_KLTE_KDI
+CONFIG_NFC_PN547
+CONFIG_NFC_PN547_PMC8974_CLK_REQ
+CONFIG_USE_VM_KEYBOARD_REJECT
+CONFIG_CHARGER_SMB1357
+CONFIG_CHARGER_MAX77804K
+CONFIG_FELICA
+CONFIG_NFC_FELICA
+CONFIG_CHARGE_LEVEL
+"
+
+    echo "
+# CONFIG_MACH_KLTE_EUR is not set
+CONFIG_MACH_KLTE_JPN=y
+CONFIG_MACH_KLTE_KDI=y
+# CONFIG_NFC_PN547 is not set
+# CONFIG_NFC_PN547_PMC8974_CLK_REQ is not set
+# CONFIG_USE_VM_KEYBOARD_REJECT is not set
+CONFIG_CHARGER_SMB1357=y
+# CONFIG_CHARGER_MAX77804K is not set
+CONFIG_FELICA=y
+CONFIG_NFC_FELICA=y
+# CONFIG_CHARGE_LEVEL is not set
+" >> $OUTPUT_FOLDER/.config
+
+    echo "Compiling kernel for kltekdi"
+    ;;
+
+        kltechn)
+    scripts/configcleaner "
+CONFIG_MACH_KLTE_EUR
+CONFIG_MACH_KLTE_CHN
+CONFIG_MACH_KLTE_CU
+CONFIG_SEC_LOCALE_CHN
+CONFIG_WLAN_REGION_CODE
+CONFIG_USE_VM_KEYBOARD_REJECT
+CONFIG_W1_CF
+CONFIG_SND_SOC_ES704_TEMP
+CONFIG_SENSORS_FPRINT_SECURE
+"
+    echo "
+# CONFIG_MACH_KLTE_EUR is not set
+CONFIG_MACH_KLTE_CHN=y
+CONFIG_MACH_KLTE_CU=y
+CONFIG_SEC_LOCALE_CHN=y
+CONFIG_WLAN_REGION_CODE=300
+# CONFIG_USE_VM_KEYBOARD_REJECT is not set
+CONFIG_W1_CF=y
+CONFIG_SND_SOC_ES704_TEMP=y
+CONFIG_SENSORS_FPRINT_SECURE=y
+" >> $OUTPUT_FOLDER/.config
+
+    echo "Compiling kernel for kltechn"
+    ;;
+
+        kltekor)
+    scripts/configcleaner "
+CONFIG_MACH_KLTE_EUR
+CONFIG_MACH_KLTE_KOR
+CONFIG_MACH_KLTE_KTT
+CONFIG_MSM_L2_ERP_PORT_PANIC
+CONFIG_WLAN_REGION_CODE
+CONFIG_SEC_DEVIDE_RINGTONE_GAIN
+CONFIG_SND_SOC_ES704_TEMP
+CONFIG_USB_LOCK_SUPPORT_FOR_MDM
+CONFIG_SENSORS_SSP_SHTC1
+"
+
+    echo "
+# CONFIG_MACH_KLTE_EUR is not set
+CONFIG_MACH_KLTE_KOR=y
+CONFIG_MACH_KLTE_KTT=y
+CONFIG_MSM_L2_ERP_PORT_PANIC=y
+CONFIG_WLAN_REGION_CODE=200
+CONFIG_SEC_DEVIDE_RINGTONE_GAIN=y
+CONFIG_SND_SOC_ES704_TEMP=y
+CONFIG_USB_LOCK_SUPPORT_FOR_MDM=y
+CONFIG_SENSORS_SSP_SHTC1=y
+" >> $OUTPUT_FOLDER/.config
+
+    echo "Compiling kernel for kltekor"
+    ;;
+
+        klteduos)
+    scripts/configcleaner "
+CONFIG_MACH_KLTE_LTNDUOS
+"
+
+    echo "
+CONFIG_MACH_KLTE_LTNDUOS=y
+" >> $OUTPUT_FOLDER/.config
+
+    echo "Compiling kernel for klteduos"
+    ;;
+
+        klteactive)
+    scripts/configcleaner "
+CONFIG_SEC_K_PROJECT
+CONFIG_MACH_KLTE_EUR
+CONFIG_SEC_KACTIVE_PROJECT
+CONFIG_MACH_KACTIVELTE_EUR
+CONFIG_SENSORS_HALL
+CONFIG_SENSORS_HALL_IRQ_CTRL
+CONFIG_KEYBOARD_CYPRESS_TOUCHKEY
+CONFIG_SENSORS_FINGERPRINT
+CONFIG_SENSORS_FINGERPRINT_SYSFS
+CONFIG_SENSORS_VFS61XX
+CONFIG_SENSORS_VFS61XX_KO
+CONFIG_SENSORS_FPRINT_SECURE
+"
+
+  echo "
+# CONFIG_SEC_K_PROJECT is not set
+# CONFIG_MACH_KLTE_EUR is not set
+CONFIG_SEC_KACTIVE_PROJECT=y
+CONFIG_MACH_KACTIVELTE_EUR=y
+# CONFIG_SENSORS_HALL is not set
+# CONFIG_SENSORS_HALL_IRQ_CTRL is not set
+# CONFIG_KEYBOARD_CYPRESS_TOUCHKEY is not set
+# CONFIG_SENSORS_FINGERPRINT is not set
+" >> $OUTPUT_FOLDER/.config
+;;
+
+esac
+
 	echo "Makestring: $MAKESTRING"
 	make $MAKESTRING
 }
